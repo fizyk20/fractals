@@ -1,0 +1,17 @@
+[package]
+name = "mandelbrot"
+version = "0.1.0"
+authors = ["Bartłomiej Kamiński <fizyk.od.czapy@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+image = "0.23"
+num-complex = "0.3"
+iced = "0.2"
+iced_native = "0.3"
+rayon = "1.5"
+
+[features]
+default = ["iced/image"]
