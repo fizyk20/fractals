@@ -6,23 +6,6 @@ use image::{Bgra, ImageBuffer};
 use num_complex::Complex;
 use rayon::{iter::ParallelBridge, prelude::ParallelIterator};
 
-fn xy_to_point(
-    width: u32,
-    height: u32,
-    center: Complex<f64>,
-    scale: f64,
-    x: u32,
-    y: u32,
-) -> Complex<f64> {
-    let greater_dim = max(width, height) as f64;
-    let width_ratio = (width as f64) / (greater_dim as f64);
-    let height_ratio = (height as f64) / (greater_dim as f64);
-    let x = ((x as f64 / greater_dim) - 0.5 * width_ratio) * scale;
-    let y = (0.5 * height_ratio - (y as f64 / greater_dim)) * scale;
-
-    center + Complex::new(x, y)
-}
-
 const NUM_COLORS: u32 = 2048;
 
 fn test_number(c: Complex<f64>, n: u32) -> Option<f32> {
@@ -51,31 +34,43 @@ fn color_palette(val: Option<f32>, n: u32) -> Bgra<u8> {
     }
 }
 
-fn generate(
-    width: u32,
-    height: u32,
+#[derive(Clone, Copy)]
+struct ViewState {
     center: Complex<f64>,
     scale: f64,
-) -> ImageBuffer<Bgra<u8>, Vec<u8>> {
-    let mut image = ImageBuffer::new(width, height);
+    width: u32,
+    height: u32,
+}
 
-    image
-        .enumerate_pixels_mut()
-        .par_bridge()
-        .for_each(|(x, y, pixel)| {
-            let c = xy_to_point(width, height, center, scale, x, y);
-            let value = test_number(c, NUM_COLORS);
-            *pixel = color_palette(value, NUM_COLORS);
-        });
+impl ViewState {
+    fn xy_to_point(&self, x: u32, y: u32) -> Complex<f64> {
+        let greater_dim = max(self.width, self.height) as f64;
+        let width_ratio = (self.width as f64) / (greater_dim as f64);
+        let height_ratio = (self.height as f64) / (greater_dim as f64);
+        let x = ((x as f64 / greater_dim) - 0.5 * width_ratio) * self.scale;
+        let y = (0.5 * height_ratio - (y as f64 / greater_dim)) * self.scale;
 
-    image
+        self.center + Complex::new(x, y)
+    }
+
+    fn generate(&self) -> ImageBuffer<Bgra<u8>, Vec<u8>> {
+        let mut image = ImageBuffer::new(self.width, self.height);
+
+        image
+            .enumerate_pixels_mut()
+            .par_bridge()
+            .for_each(|(x, y, pixel)| {
+                let c = self.xy_to_point(x, y);
+                let value = test_number(c, NUM_COLORS);
+                *pixel = color_palette(value, NUM_COLORS);
+            });
+
+        image
+    }
 }
 
 struct AppState {
-    center: Complex<f64>,
-    scale: f64,
-    width: u32,
-    height: u32,
+    view_state: ViewState,
     image: ImageBuffer<Bgra<u8>, Vec<u8>>,
     cursor: (f32, f32),
     panning: Option<(f32, f32)>,
@@ -96,13 +91,16 @@ impl Application for AppState {
     type Message = Message;
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
+        let view_state = ViewState {
+            center: Complex::new(-0.5, 0.0),
+            scale: 4.0,
+            width: 10,
+            height: 10,
+        };
         (
             AppState {
-                center: Complex::new(-0.5, 0.0),
-                scale: 4.0,
-                width: 10,
-                height: 10,
-                image: generate(10, 10, Complex::new(-0.5, 0.0), 4.0),
+                view_state,
+                image: view_state.generate(),
                 cursor: (0.0, 0.0),
                 panning: None,
             },
@@ -117,8 +115,8 @@ impl Application for AppState {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::WindowResize { width, height } => {
-                self.width = width;
-                self.height = height;
+                self.view_state.width = width;
+                self.view_state.height = height;
                 self.regenerate();
             }
             Message::MousePress => {
@@ -127,11 +125,11 @@ impl Application for AppState {
             Message::MouseRelease => {
                 if let Some((old_x, old_y)) = self.panning.take() {
                     let (x, y) = self.cursor;
-                    let max_dim = max(self.width, self.height) as f64;
+                    let max_dim = max(self.view_state.width, self.view_state.height) as f64;
                     let dx = (x - old_x) as f64;
                     let dy = (y - old_y) as f64;
-                    let pan = Complex::new(-dx, dy) / max_dim * self.scale;
-                    self.center += pan;
+                    let pan = Complex::new(-dx, dy) / max_dim * self.view_state.scale;
+                    self.view_state.center += pan;
                     self.regenerate();
                 }
             }
@@ -139,7 +137,13 @@ impl Application for AppState {
                 self.cursor = (x, y);
             }
             Message::MouseScroll { delta } => {
-                self.scale *= (delta as f64).exp();
+                let factor = (delta as f64).exp();
+                let point_under_cursor = self
+                    .view_state
+                    .xy_to_point(self.cursor.0 as u32, self.cursor.1 as u32);
+                let center_diff = self.view_state.center - point_under_cursor;
+                self.view_state.scale /= factor;
+                self.view_state.center = point_under_cursor + center_diff / factor;
                 self.regenerate();
             }
         }
@@ -147,7 +151,11 @@ impl Application for AppState {
     }
 
     fn view(&mut self) -> Element<Message> {
-        let handle = Handle::from_pixels(self.width, self.height, self.image.as_raw().clone());
+        let handle = Handle::from_pixels(
+            self.view_state.width,
+            self.view_state.height,
+            self.image.as_raw().clone(),
+        );
         Image::new(handle)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -178,7 +186,7 @@ impl Application for AppState {
 
 impl AppState {
     fn regenerate(&mut self) {
-        self.image = generate(self.width, self.height, self.center, self.scale);
+        self.image = self.view_state.generate();
     }
 }
 
