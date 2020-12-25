@@ -29,7 +29,7 @@ fn test_number(c: Complex<f64>, n: u32) -> Option<f32> {
     let mut z = Complex::new(0.0, 0.0);
     for i in 0..n {
         z = z * z + c;
-        if z.norm() >= 2.0 {
+        if z.norm() >= 16.0 {
             return Some(i as f32 + 1.0 - z.norm().log2().ln() as f32);
         }
     }
@@ -41,17 +41,12 @@ fn color_palette(val: Option<f32>, n: u32) -> Bgra<u8> {
         None => Bgra([0, 0, 0, 255]),
         Some(val) => {
             let fval = val / (n as f32);
-            let fval = fval.sqrt().sqrt();
-            if fval <= 0.1 {
-                let r = (fval / 0.1 * 255.0) as u8;
-                Bgra([0, 0, r, 255])
-            } else if fval <= 0.5 {
-                let g = ((fval - 0.1) / 0.4 * 255.0) as u8;
-                Bgra([0, g, 255, 255])
-            } else {
-                let b = ((fval - 0.5) / 0.5 * 255.0) as u8;
-                Bgra([b, 255, 255, 255])
-            }
+            let fval = fval.sqrt();
+            let pi = 3.14159265f32;
+            let r = ((pi / 2.0 * fval).sin().powi(2) * 255.0) as u8;
+            let g = ((3.0 * pi / 2.0 * fval).sin().powi(2) * 255.0) as u8;
+            let b = ((7.0 * pi / 2.0 * fval).sin().powi(2) * 255.0) as u8;
+            Bgra([b, g, r, 255])
         }
     }
 }
